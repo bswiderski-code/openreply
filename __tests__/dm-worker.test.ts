@@ -17,6 +17,7 @@ const {
   mockReleaseWorkspaceDMReservation,
 } = vi.hoisted(() => ({
   mockPrisma: {
+    zernioConnection: { findUnique: vi.fn() },
     automation: {
       findMany: vi.fn(),
       findFirst: vi.fn(),
@@ -877,7 +878,11 @@ describe("DM Worker — one private reply per comment", () => {
       {
         ...mockAutomation,
         trackedLinks: [
-          { slug: "abc123", label: null, destinationUrl: "https://example.com" },
+          {
+            slug: "abc123",
+            label: null,
+            destinationUrl: "https://example.com",
+          },
         ],
       },
     ]);
@@ -908,7 +913,11 @@ describe("DM Worker — one private reply per comment", () => {
       {
         ...mockAutomation,
         trackedLinks: [
-          { slug: "abc123", label: null, destinationUrl: "https://example.com" },
+          {
+            slug: "abc123",
+            label: null,
+            destinationUrl: "https://example.com",
+          },
         ],
       },
     ]);
@@ -1114,5 +1123,59 @@ describe("DM Worker — DM keyword trigger", () => {
         create: expect.objectContaining({ status: "FAILED" }),
       })
     );
+  });
+});
+
+describe("Zernio worker routing", () => {
+  it("fails open on unknown follow status and sends once through the selected provider", async () => {
+    mockPrisma.zernioConnection.findUnique.mockResolvedValue({
+      apiKey: "encrypted_key",
+    });
+    mockPrisma.automation.findMany.mockResolvedValue([
+      {
+        ...mockAutomation,
+        requireFollow: true,
+        instagramAccount: {
+          ...mockAutomation.instagramAccount,
+          provider: "ZERNIO",
+          workspaceId: "workspace_123",
+          zernioAccountId: "zernio_selected",
+          accessToken: "",
+        },
+      },
+    ]);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            isFollower: null,
+            unavailableReason: "consent_required",
+          })
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ messageId: "sent" }))
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await getProcessor()(createMockJob());
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls[1][0]).toContain(
+        "/inbox/comments/media_101/comment_555/private-reply"
+      );
+      expect(JSON.parse(fetchMock.mock.calls[1][1].body).accountId).toBe(
+        "zernio_selected"
+      );
+      expect(mockSendPrivateReply).not.toHaveBeenCalled();
+      expect(mockSendPrivateReplyWithButton).not.toHaveBeenCalled();
+      expect(mockPrisma.dmLog.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ status: "SENT" }),
+        })
+      );
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
