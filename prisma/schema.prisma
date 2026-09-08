@@ -405,3 +405,9 @@ model ZernioConnection {
   updatedAt      DateTime @updatedAt
   workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
+
+// Claims persist independently of BullMQ retention so old taps never resend.
+model PostbackDelivery {
+  id String @id
+  createdAt DateTime @default(now())
+}

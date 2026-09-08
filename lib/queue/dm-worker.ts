@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { UnrecoverableError, Worker, type Job } from "bullmq";
 import {
   getDMQueue,
@@ -737,6 +738,49 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
   }
 }
 
+async function sendPostbackOnce({
+  operationId,
+  send,
+}: {
+  operationId: string | null;
+  send: () => Promise<unknown>;
+}): Promise<boolean> {
+  if (!operationId) {
+    await send();
+    return true;
+  }
+  try {
+    await prisma.postbackDelivery.create({ data: { id: operationId } });
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "P2002"
+    )
+      return false;
+    throw error;
+  }
+  try {
+    await send();
+    return true;
+  } catch (error) {
+    // A durable claim survives queue eviction, concurrent redelivery, and a
+    // process crash during delivery. Only confirmed rejections permit retry.
+    if (
+      (error instanceof ZernioApiError && error.code < 500) ||
+      error instanceof RateLimitError ||
+      error instanceof TokenExpiredError
+    ) {
+      await prisma.postbackDelivery.delete({ where: { id: operationId } });
+      throw error;
+    }
+    throw error instanceof ZernioDeliveryUnconfirmedError
+      ? error
+      : new ZernioDeliveryUnconfirmedError();
+  }
+}
+
 /**
  * Deliver the reveal message after a user taps an opening DM's button.
  * The postback payload is `reveal:<automationId>`; the sender is the user's
@@ -748,7 +792,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   const isFollowCheck = payload.startsWith("followcheck:");
   if (!isFollowCheck && !payload.startsWith("reveal:")) return;
   const automationId = payload.slice(
-    isFollowCheck ? "followcheck:".length : "reveal:".length
+    isFollowCheck ? "followcheck:".length : "reveal:".length,
   );
 
   const automation = await prisma.automation.findFirst({
@@ -802,11 +846,25 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   try {
     accessToken = await createInstagramContext(
       automation.instagramAccount,
-      `${job.id}:${automation.id}`
+      `${job.id}:${automation.id}`,
     );
   } catch {
     return;
   }
+
+  const operationId =
+    accessToken.provider === "ZERNIO"
+      ? createHash("sha256")
+          .update(
+            JSON.stringify([
+              automation.instagramAccountId,
+              automation.id,
+              userId,
+              job.data.mid ?? job.id ?? payload,
+            ]),
+          )
+          .digest("hex")
+      : null;
 
   // Follow-gate: before revealing the link, verify the user follows. On a
   // `followcheck:` tap a non-follower gets the prompt again (no quota spent);
@@ -828,18 +886,23 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
         commenterName,
       });
       try {
-        await sendDirectMessageWithButton({
-          context: accessToken,
-          instagramAccountId: automation.instagramAccount.instagramId,
-          userId: userId,
-          text: promptText,
-          buttonTitle: automation.followPromptButtonLabel || "i'm following",
-          payload: `followcheck:${automation.id}`,
+        await sendPostbackOnce({
+          operationId,
+          send: () =>
+            sendDirectMessageWithButton({
+              context: accessToken,
+              instagramAccountId: automation.instagramAccount.instagramId,
+              userId: userId,
+              text: promptText,
+              buttonTitle:
+                automation.followPromptButtonLabel || "i'm following",
+              payload: `followcheck:${automation.id}`,
+            }),
         });
       } catch (error) {
         console.log(
           "[DM Worker] Failed to re-send follow prompt:",
-          formatError(error)
+          formatError(error),
         );
       }
       return;
@@ -872,13 +935,24 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   }
 
   try {
-    await sendRevealDirectMessage({
-      accessToken: accessToken,
-      automation: automation,
-      userId: userId,
-      commenterName: commenterName,
-      context: "postback",
+    const delivered = await sendPostbackOnce({
+      operationId,
+      send: () =>
+        sendRevealDirectMessage({
+          accessToken: accessToken,
+          automation: automation,
+          userId: userId,
+          commenterName: commenterName,
+          context: "postback",
+        }),
     });
+    if (!delivered) {
+      await releaseWorkspaceDMReservation(
+        automation.workspaceId,
+        usage.periodStart,
+      );
+      return;
+    }
     // Optional appreciation follow-up: once the link has been delivered, send a
     // short thank-you. It is scheduled as its own delayed job so it can go out
     // some minutes later (followUpDelayMinutes) rather than immediately. The
@@ -898,7 +972,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
         {
           delay: delayMs,
           jobId: `followup_${automation.id}_${userId}`,
-        }
+        },
       );
     }
     await prisma.dmLog.upsert({
@@ -924,7 +998,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   } catch (error) {
     await releaseWorkspaceDMReservation(
       automation.workspaceId,
-      usage.periodStart
+      usage.periodStart,
     );
 
     // The read fallback is speculative: it only runs when the user read the
@@ -937,7 +1011,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     if (fallback && !(error instanceof ZernioDeliveryUnconfirmedError)) {
       console.log(
         "[DM Worker] Read fallback not delivered (messaging window closed):",
-        formatError(error)
+        formatError(error),
       );
       return;
     }
@@ -959,9 +1033,13 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
         commentId: dedupeId,
         status: "FAILED",
         errorMessage: formatError(error),
-          dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
+        dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
       },
-      update: { status: "FAILED", errorMessage: formatError(error), dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError },
+      update: {
+        status: "FAILED",
+        errorMessage: formatError(error),
+        dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
+      },
     });
     throw error;
   }
