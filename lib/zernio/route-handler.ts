@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
+import { Prisma } from '@/app/generated/prisma/client';
 import { MetaApiError } from '@/lib/meta/client';
 import { canManageWorkspace, getCurrentWorkspaceContext, type WorkspaceContext } from '@/lib/workspace-access';
 
@@ -19,6 +20,7 @@ export function withZernioManagement(handler: (context: WorkspaceContext, reques
       }
       return await handler(context, request);
     } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') return NextResponse.json({ success: false, error: 'This connection was already added. Refresh and try again.' }, { status: 409 });
       if (error instanceof ConnectionError) return NextResponse.json({ success: false, error: error.message }, { status: error.status });
       if (error instanceof z.ZodError) return NextResponse.json({ success: false, error: 'Unexpected Zernio response. Please retry or contact support.' }, { status: 502 });
       if (error instanceof MetaApiError) {

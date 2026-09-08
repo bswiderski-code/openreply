@@ -28,11 +28,12 @@ export function webhookUrl({ baseUrl, workspaceId }: { baseUrl: string; workspac
   return new URL(`/api/zernio/webhook/${encodeURIComponent(workspaceId)}`, baseUrl).toString();
 }
 
-export async function ensureWebhook({ apiKey, workspaceId, secret, baseUrl }: {
-  apiKey: string; workspaceId: string; secret: string; baseUrl: string;
+export async function ensureWebhook({ apiKey, workspaceId, secret, baseUrl, webhookId }: {
+  apiKey: string; workspaceId: string; secret: string; baseUrl: string; webhookId?: string | null;
 }) {
   const url = webhookUrl({ baseUrl, workspaceId });
-  const existing = (await listWebhooks(apiKey)).find(w => w.url === url);
+  const webhooks = await listWebhooks(apiKey);
+  const existing = webhooks.find(w => w._id === webhookId) ?? webhooks.find(w => w.url === url);
   const body = { name: 'OpenReply', url, secret, events: EVENTS, isActive: true };
   if (existing) {
     await zernioRequest({ apiKey, path: '/webhooks/settings', method: 'PUT', body: { ...body, _id: existing._id } });

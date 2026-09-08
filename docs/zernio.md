@@ -49,3 +49,9 @@ If you change your public deployment URL, update `NEXTAUTH_URL` on both processe
 Disconnecting an account from OpenReply does **not** delete it from Zernio. Manage the upstream account in Zernio separately. There is no automatic migration between Zernio and direct Meta.
 
 Sponsorship appears only in OpenReply’s project and interface surfaces. OpenReply does not append Zernio branding or promotional text to customer messages.
+
+### Delivery uncertainty and retries
+
+If Zernio times out or returns an ambiguous send response, OpenReply marks the delivery unconfirmed and avoids automatically sending it again. Inspect the Instagram inbox before retrying manually. Public replies and private DMs track their outcomes independently. Durable postback receipts distinguish a replayed event from a new button tap, including after queue history expires; these receipts also survive a worker restart during delivery.
+
+Deploy the database migrations (`npm run db:migrate`) before starting the updated web app and worker. The integration adds provider/connection storage, independent delivery-uncertainty flags, and durable postback receipts. Existing Instagram accounts default to the direct Meta provider.

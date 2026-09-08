@@ -25,3 +25,13 @@ describe('Zernio workspace management', () => {
     expect(request.mock.calls[1][0]).toMatchObject({ method: 'POST', body: { url: 'https://open.example/api/zernio/webhook/ws' } });
   });
 });
+
+it('moves the saved installation webhook when the public base URL changes', async () => {
+  request.mockResolvedValueOnce({ webhooks: [
+    { _id: 'unrelated', url: 'https://customer.example/hook' },
+    { _id: 'ours', url: 'https://old.example/api/zernio/webhook/ws' },
+  ] }).mockResolvedValueOnce({});
+  await ensureWebhook({ apiKey: 'key', workspaceId: 'ws', secret: 'secret', baseUrl: 'https://new.example', webhookId: 'ours' });
+  expect(request.mock.calls[1][0]).toMatchObject({ method: 'PUT', body: { _id: 'ours', url: 'https://new.example/api/zernio/webhook/ws' } });
+  expect(request).toHaveBeenCalledTimes(2);
+});
