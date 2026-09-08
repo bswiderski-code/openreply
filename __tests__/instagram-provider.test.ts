@@ -270,3 +270,13 @@ it("adds a repeatable idempotency key and stops on an unconfirmed direct send", 
     ZernioDeliveryUnconfirmedError
   );
 });
+
+it('treats a lost public-reply response as unconfirmed instead of safe to repeat', async () => {
+  fetchMock.mockReset(); vi.stubGlobal('fetch', fetchMock);
+  const { sendCommentReply } = await import('@/lib/instagram/provider');
+  fetchMock.mockRejectedValueOnce(new Error('connection reset'));
+  await expect(sendCommentReply({ context, commentId: 'comment', postId: 'post', message: 'Thanks' })).rejects.toMatchObject({ name: 'ZernioDeliveryUnconfirmedError' });
+  respond({ data: {} });
+  await expect(sendCommentReply({ context, commentId: 'comment', postId: 'post', message: 'Thanks' })).rejects.toMatchObject({ name: 'ZernioDeliveryUnconfirmedError' });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});

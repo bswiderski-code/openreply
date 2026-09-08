@@ -239,9 +239,10 @@ async function sweepCampaign({
       where: {
         automationId: automation.id,
         commentId: { in: needsAction.map((c) => c.id) },
-        ...(automation.publicReplyEnabled
-          ? { publicReplySentAt: { not: null } }
-          : { status: "SENT" }),
+        AND: [
+          { OR: [{ status: "SENT" }, { dmDeliveryUnconfirmed: true }] },
+          ...(automation.publicReplyEnabled ? [{ OR: [{ publicReplySentAt: { not: null } }, { publicReplyDeliveryUnconfirmed: true }] }] : []),
+        ],
       },
       select: { commentId: true },
     });
@@ -261,6 +262,7 @@ async function sweepCampaign({
       // (publicReplySentAt / SENT), so re-processing a comment is safe.
       await queue.add("process-comment", {
         instagramAccountId: account.instagramId,
+        accountConnectionId: account.id,
         commentId: c.id,
         commentText: c.text ?? "",
         commenterId: c.from!.id,

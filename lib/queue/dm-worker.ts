@@ -210,6 +210,11 @@ async function sendRevealDirectMessage({
   }
 }
 
+
+function connectionScope(data: DmQueueJob) {
+  return data.accountConnectionId ? { instagramAccountId: data.accountConnectionId } : {};
+}
+
 async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
   const {
     instagramAccountId,
@@ -224,6 +229,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
 
   const automations = await prisma.automation.findMany({
     where: {
+      ...connectionScope(job.data),
       // Match campaigns bound to this specific post, plus any-post campaigns.
       // A comment left on an ad carries the ad's own media id, while the
       // campaign is bound to the post the ad was created from, so both ids
@@ -278,15 +284,15 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
 
     const alreadyDmd = existingLog?.status === "SENT";
     const alreadyPublicReplied = Boolean(existingLog?.publicReplySentAt);
-    const needsDm = !alreadyDmd;
+    const needsDm = !alreadyDmd && !existingLog?.dmDeliveryUnconfirmed;
 
     // Skip only when there is genuinely nothing left to do. A comment whose DM
     // already sent but whose public reply never posted (e.g. it hit a rate
     // limit) must still come back so the public reply can be retried.
     if (existingLog?.status === "SKIPPED_PLAN_LIMIT") continue;
     if (
-      alreadyDmd &&
-      (alreadyPublicReplied || !automation.publicReplyEnabled)
+      !needsDm &&
+      (alreadyPublicReplied || existingLog?.publicReplyDeliveryUnconfirmed || !automation.publicReplyEnabled)
     ) {
       continue;
     }
@@ -397,7 +403,8 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
     if (
       automation.publicReplyEnabled &&
       replyPool.length > 0 &&
-      !existingLog?.publicReplySentAt
+      !existingLog?.publicReplySentAt &&
+      !existingLog?.publicReplyDeliveryUnconfirmed
     ) {
       try {
         const chosen = replyPool[Math.floor(Math.random() * replyPool.length)];
@@ -431,7 +438,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
                 commentId,
               },
             },
-            data: { publicReplyError: formatError(error) },
+            data: { publicReplyError: formatError(error), publicReplyDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError },
           })
           .catch(() => {});
       }
@@ -507,6 +514,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           status: "FAILED",
           attempts: job.attemptsMade + 1,
           errorMessage: formatError(error),
+          dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
         },
       });
       throw error;
@@ -721,6 +729,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           status: "FAILED",
           attempts: job.attemptsMade + 1,
           errorMessage: formatError(error),
+          dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
         },
       });
       throw error;
@@ -743,7 +752,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   );
 
   const automation = await prisma.automation.findFirst({
-    where: { id: automationId, isActive: true },
+    where: { id: automationId, isActive: true, ...connectionScope(job.data) },
     include: {
       instagramAccount: true,
       workspace: true,
@@ -777,7 +786,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     });
     if (
       existingReveal?.status === "SENT" ||
-      existingReveal?.errorMessage?.includes("ZernioDeliveryUnconfirmedError")
+      existingReveal?.dmDeliveryUnconfirmed
     )
       return;
   }
@@ -881,6 +890,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
         FOLLOWUP_JOB_NAME,
         {
           instagramAccountId: automation.instagramAccount.instagramId,
+          accountConnectionId: automation.instagramAccountId,
           userId,
           automationId: automation.id,
           commenterName,
@@ -949,8 +959,9 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
         commentId: dedupeId,
         status: "FAILED",
         errorMessage: formatError(error),
+          dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
       },
-      update: { status: "FAILED", errorMessage: formatError(error) },
+      update: { status: "FAILED", errorMessage: formatError(error), dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError },
     });
     throw error;
   }
@@ -965,7 +976,7 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
   const { instagramAccountId, userId, automationId, commenterName } = job.data;
 
   const automation = await prisma.automation.findFirst({
-    where: { id: automationId, isActive: true },
+    where: { id: automationId, isActive: true, ...connectionScope(job.data) },
     include: { instagramAccount: true },
   });
 
@@ -1020,6 +1031,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
 
   const automations = await prisma.automation.findMany({
     where: {
+      ...connectionScope(job.data),
       dmTriggerEnabled: true,
       isActive: true,
       instagramAccount: { instagramId: instagramAccountId },
@@ -1062,7 +1074,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     if (
       existingLog?.status === "SENT" ||
       existingLog?.status === "SKIPPED_PLAN_LIMIT" ||
-      existingLog?.errorMessage?.includes("ZernioDeliveryUnconfirmedError")
+      existingLog?.dmDeliveryUnconfirmed
     ) {
       continue;
     }
@@ -1207,6 +1219,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
             FOLLOWUP_JOB_NAME,
             {
               instagramAccountId: automation.instagramAccount.instagramId,
+              accountConnectionId: automation.instagramAccountId,
               userId: senderId,
               automationId: automation.id,
               commenterName,
@@ -1256,11 +1269,13 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
           status: "FAILED",
           attempts: job.attemptsMade + 1,
           errorMessage: formatError(error),
+          dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
         },
         update: {
           status: "FAILED",
           attempts: job.attemptsMade + 1,
           errorMessage: formatError(error),
+          dmDeliveryUnconfirmed: error instanceof ZernioDeliveryUnconfirmedError,
         },
       });
       throw error;

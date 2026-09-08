@@ -263,6 +263,10 @@ export async function sendCommentReply({
     path: `/inbox/comments/${encodeURIComponent(postId ?? commentId)}`,
     method: "POST",
     body: { accountId: context.accountId, commentId, message },
+  }).catch((error: unknown) => {
+    if (error instanceof ZernioApiError && error.code >= 500) throw new ZernioDeliveryUnconfirmedError();
+    throw error;
   });
+  if (!result?.data?.commentId) throw new ZernioDeliveryUnconfirmedError();
   return { id: result.data.commentId };
 }

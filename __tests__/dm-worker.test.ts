@@ -1211,3 +1211,26 @@ it("stops BullMQ retries after an ambiguous Zernio direct-message outcome", asyn
     vi.unstubAllGlobals();
   }
 });
+
+it('binds queued comments to the local connection that received them', async () => {
+  mockPrisma.automation.findMany.mockResolvedValue([]);
+  const job = createMockJob();
+  Object.assign(job.data, { accountConnectionId: 'original-connection' });
+  await getProcessor()(job);
+  expect(mockPrisma.automation.findMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ instagramAccountId: 'original-connection' }) }));
+});
+
+it('never automatically resends a private reply with an unconfirmed delivery', async () => {
+  mockPrisma.dmLog.findUnique.mockResolvedValue({ status: 'FAILED', dmDeliveryUnconfirmed: true, publicReplySentAt: null });
+  await getProcessor()(createMockJob());
+  expect(mockSendPrivateReply).not.toHaveBeenCalled();
+  expect(mockSendPrivateReplyWithButton).not.toHaveBeenCalled();
+  expect(mockPrisma.dmLog.update).not.toHaveBeenCalled();
+});
+
+it('keeps an unconfirmed public reply untouched after the DM was delivered', async () => {
+  mockPrisma.automation.findMany.mockResolvedValue([{ ...mockAutomation, publicReplyEnabled: true, publicReplyMessage: 'Thanks!', publicReplyMessages: [] }]);
+  mockPrisma.dmLog.findUnique.mockResolvedValue({ status: 'SENT', publicReplyDeliveryUnconfirmed: true, publicReplySentAt: null });
+  await getProcessor()(createMockJob());
+  expect(mockPrisma.dmLog.update).not.toHaveBeenCalled();
+});
