@@ -12,11 +12,15 @@ Verified on 2026-09-08 using an isolated OpenReply installation with PostgreSQL 
 - Website: checked 320, 390, 768, and 1440 pixel widths, keyboard access, FAQ controls, and sponsor link parameters. On the live Zernio website, OpenReply attribution cookies survived navigation from the tracked landing URL to signup. No new signup or purchase was created.
 - Automated checks: 231 tests passed, including provider contracts, management boundaries, signed event normalization, uncertain delivery, and postback replay after queue eviction. ESLint, TypeScript, and the production build passed.
 
-## Live check still requiring a human
+## Live comment and private DM
 
-A real Instagram comment followed by receipt of the private DM has **not yet been verified**. Imported-account onboarding was exercised; a fresh Instagram OAuth authorization was not completed. Mocked provider contract tests are not evidence of live outbound delivery.
+At 19:59 UTC, OpenReply reconciled a real test comment on a team-owned Instagram post, matched the exact test keyword, and sent the configured private reply through Zernio. The worker recorded `SENT` with no error or delivery-uncertainty flag. Reading the actual conversation through the Zernio provider returned exactly one matching outgoing message. A second reconciliation pass preserved the original send timestamp and produced no duplicate send.
 
-To complete the comment-to-DM check:
+The comment arrived after the temporary webhook test environment had shut down, so this live send exercised the **comment reconciliation → queue → worker → Zernio → Instagram conversation** path. It does not prove live delivery of that comment through the webhook; signed HTTP-to-worker ingress was tested separately above. Recipient-side confirmation is recorded separately from API confirmation.
+
+Imported-account onboarding was exercised; fresh Instagram OAuth authorization and live button follow-ups were not completed.
+
+To reproduce the comment-to-DM check:
 
 1. Follow [Zernio setup](zernio.md), with both web and worker processes running.
 2. Create an active campaign for a team-owned post with a unique exact keyword and a harmless test message. Avoid another automation matching the same keyword.
