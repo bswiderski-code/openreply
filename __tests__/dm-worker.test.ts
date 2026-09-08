@@ -126,6 +126,9 @@ vi.mock("bullmq", () => {
   }
   return {
     Worker: MockWorker,
+    UnrecoverableError: class UnrecoverableError extends Error {
+      name = "UnrecoverableError";
+    },
   };
 });
 
@@ -1178,4 +1181,33 @@ describe("Zernio worker routing", () => {
       vi.unstubAllGlobals();
     }
   });
+});
+
+it("stops BullMQ retries after an ambiguous Zernio direct-message outcome", async () => {
+  mockPrisma.zernioConnection.findUnique.mockResolvedValue({
+    apiKey: "encrypted",
+  });
+  mockPrisma.automation.findFirst.mockResolvedValue({
+    ...mockAutomation,
+    instagramAccount: {
+      ...mockAutomation.instagramAccount,
+      provider: "ZERNIO",
+      workspaceId: "workspace_123",
+      zernioAccountId: "remote",
+      accessToken: "",
+    },
+  });
+  const fetchMock = vi.fn().mockRejectedValue(new Error("connection reset"));
+  vi.stubGlobal("fetch", fetchMock);
+  try {
+    await expect(getProcessor()(createMockPostbackJob())).rejects.toMatchObject(
+      {
+        name: "UnrecoverableError",
+        message: expect.stringContaining("Inspect the Instagram inbox"),
+      }
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });

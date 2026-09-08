@@ -8,6 +8,7 @@ export type InstagramContext =
       apiKey: string;
       accountId: string;
       instagramId: string;
+      operationId?: string;
     };
 
 export type ProviderAccount = {
@@ -27,7 +28,8 @@ export function hasInstagramCredentials(
 }
 
 export async function createInstagramContext(
-  account: ProviderAccount
+  account: ProviderAccount,
+  operationId?: string
 ): Promise<InstagramContext> {
   if (account.provider !== "ZERNIO")
     return { provider: "META", accessToken: decryptToken(account.accessToken) };
@@ -43,6 +45,7 @@ export async function createInstagramContext(
     apiKey: decryptToken(connection.apiKey),
     accountId: account.zernioAccountId,
     instagramId: account.instagramId,
+    ...(operationId ? { operationId } : {}),
   };
 }
 

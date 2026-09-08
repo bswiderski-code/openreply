@@ -243,3 +243,30 @@ it("recognizes Reels only from an explicit Instagram Reel permalink", async () =
   });
   expect(media[1].media_product_type).toBeUndefined();
 });
+
+it("adds a repeatable idempotency key and stops on an unconfirmed direct send", async () => {
+  fetchMock.mockReset();
+  vi.stubGlobal("fetch", fetchMock);
+  const { ZernioDeliveryUnconfirmedError } = await import(
+    "@/lib/zernio/client"
+  );
+  const input = {
+    context: { ...context, operationId: "job:campaign" },
+    instagramAccountId: "ig",
+    userId: "recipient",
+    text: "link",
+    buttons: [{ title: "Open", url: "https://example.com" }],
+  };
+  respond({ data: { messageId: "sent" } });
+  await sendDirectMessageWithLinkButton(input);
+  respond({ data: { messageId: "sent" } });
+  await sendDirectMessageWithLinkButton(input);
+  expect(fetchMock.mock.calls[0][1].headers["Idempotency-Key"]).toBeTruthy();
+  expect(fetchMock.mock.calls[1][1].headers["Idempotency-Key"]).toBe(
+    fetchMock.mock.calls[0][1].headers["Idempotency-Key"]
+  );
+  fetchMock.mockRejectedValueOnce(new Error("connection reset"));
+  await expect(sendDirectMessageWithLinkButton(input)).rejects.toBeInstanceOf(
+    ZernioDeliveryUnconfirmedError
+  );
+});

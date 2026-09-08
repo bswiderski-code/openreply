@@ -23,32 +23,20 @@ export async function getConversations({
     apiKey: context.apiKey,
     path: `/inbox/conversations?accountId=${encodeURIComponent(context.accountId)}&limit=50`,
   });
-  const conversations: meta.InstagramConversation[] = [];
-  // The list omits the last sender. Read the message to avoid attributing our
-  // outgoing preview to the customer; keep concurrency under the API budget.
-  for (let offset = 0; offset < result.data.length; offset += 5) {
-    const batch = await Promise.all(
-      result.data.slice(offset, offset + 5).map(async (c) => ({
-        id: c.id,
-        updated_time: c.updatedTime,
-        participants: {
-          data: c.participantId
-            ? [
-                { id: c.participantId, username: c.participantUsername },
-                { id: igUserId },
-              ]
-            : [],
-        },
-        messages: {
-          data: (
-            await getConversationMessages({ context, conversationId: c.id })
-          ).slice(0, 1),
-        },
-      }))
-    );
-    conversations.push(...batch);
-  }
-  return conversations;
+  // The list has no sender for lastMessage. Leave the optional preview absent
+  // rather than attribute it to the wrong person or fetch every full thread.
+  return result.data.map((c) => ({
+    id: c.id,
+    updated_time: c.updatedTime,
+    participants: {
+      data: c.participantId
+        ? [
+            { id: c.participantId, username: c.participantUsername },
+            { id: igUserId },
+          ]
+        : [],
+    },
+  }));
 }
 
 export async function getConversationMessages({

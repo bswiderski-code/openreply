@@ -1,4 +1,4 @@
-import { Worker, type Job } from "bullmq";
+import { UnrecoverableError, Worker, type Job } from "bullmq";
 import {
   getDMQueue,
   getRedisConnection,
@@ -43,7 +43,10 @@ import {
   renderMessageWithoutLink,
 } from "@/lib/tracking/message";
 
-import { ZernioApiError } from "@/lib/zernio/client";
+import {
+  ZernioApiError,
+  ZernioDeliveryUnconfirmedError,
+} from "@/lib/zernio/client";
 
 const BACKOFF_DELAYS = [5 * 60 * 1000, 15 * 60 * 1000, 45 * 60 * 1000];
 
@@ -318,7 +321,10 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
 
     let accessToken: InstagramContext;
     try {
-      accessToken = await createInstagramContext(automation.instagramAccount);
+      accessToken = await createInstagramContext(
+        automation.instagramAccount,
+        `${job.id}:${automation.id}`
+      );
     } catch {
       await prisma.dmLog.upsert({
         where: {
@@ -769,7 +775,11 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
         },
       },
     });
-    if (existingReveal?.status === "SENT") return;
+    if (
+      existingReveal?.status === "SENT" ||
+      existingReveal?.errorMessage?.includes("ZernioDeliveryUnconfirmedError")
+    )
+      return;
   }
 
   // Personalize {username} from the opening DM log for this user, if present.
@@ -781,7 +791,10 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
 
   let accessToken: InstagramContext;
   try {
-    accessToken = await createInstagramContext(automation.instagramAccount);
+    accessToken = await createInstagramContext(
+      automation.instagramAccount,
+      `${job.id}:${automation.id}`
+    );
   } catch {
     return;
   }
@@ -911,7 +924,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     // failure the user can act on — so don't log it as FAILED and don't retry
     // it against a window that cannot reopen on its own. It still delivers in
     // the case that does work: the user replied by typing instead of tapping.
-    if (fallback) {
+    if (fallback && !(error instanceof ZernioDeliveryUnconfirmedError)) {
       console.log(
         "[DM Worker] Read fallback not delivered (messaging window closed):",
         formatError(error)
@@ -968,7 +981,10 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
 
   let accessToken: InstagramContext;
   try {
-    accessToken = await createInstagramContext(automation.instagramAccount);
+    accessToken = await createInstagramContext(
+      automation.instagramAccount,
+      `${job.id}:${automation.id}`
+    );
   } catch {
     return;
   }
@@ -1045,7 +1061,8 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     // of the job must not send a second DM.
     if (
       existingLog?.status === "SENT" ||
-      existingLog?.status === "SKIPPED_PLAN_LIMIT"
+      existingLog?.status === "SKIPPED_PLAN_LIMIT" ||
+      existingLog?.errorMessage?.includes("ZernioDeliveryUnconfirmedError")
     ) {
       continue;
     }
@@ -1083,7 +1100,10 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
 
     let accessToken: InstagramContext;
     try {
-      accessToken = await createInstagramContext(automation.instagramAccount);
+      accessToken = await createInstagramContext(
+        automation.instagramAccount,
+        `${job.id}:${automation.id}`
+      );
     } catch {
       await prisma.dmLog.upsert({
         where: {
@@ -1248,7 +1268,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   }
 }
 
-async function processJob(job: Job<DmQueueJob>): Promise<void> {
+async function dispatchJob(job: Job<DmQueueJob>): Promise<void> {
   if (job.name === POSTBACK_JOB_NAME) {
     return processPostback(job as Job<ProcessPostbackJob>);
   }
@@ -1259,6 +1279,16 @@ async function processJob(job: Job<DmQueueJob>): Promise<void> {
     return processMessage(job as Job<ProcessMessageJob>);
   }
   return processComment(job as Job<ProcessCommentJob>);
+}
+
+async function processJob(job: Job<DmQueueJob>): Promise<void> {
+  try {
+    await dispatchJob(job);
+  } catch (error) {
+    if (error instanceof ZernioDeliveryUnconfirmedError)
+      throw new UnrecoverableError(error.message);
+    throw error;
+  }
 }
 
 async function recordWorkerFailure(

@@ -1,5 +1,10 @@
+import { createHash, randomUUID } from "node:crypto";
 import * as meta from "@/lib/meta/client";
-import { zernioRequest, ZernioApiError } from "@/lib/zernio/client";
+import {
+  zernioRequest,
+  ZernioApiError,
+  ZernioDeliveryUnconfirmedError,
+} from "@/lib/zernio/client";
 import type { InstagramContext, ZernioContext } from "./context";
 
 type Button =
@@ -24,6 +29,20 @@ async function sendZernioMessage({
   const path = commentId
     ? `/inbox/comments/${encodeURIComponent(postId ?? commentId)}/${encodeURIComponent(commentId)}/private-reply`
     : `/inbox/conversations/${encodeURIComponent(recipientId!)}/messages`;
+  const body = {
+    accountId: context.accountId,
+    message: buttons ? text.slice(0, 640) : text,
+    ...(buttons ? { buttons } : {}),
+  };
+  const idempotencyKey = createHash("sha256")
+    .update(
+      JSON.stringify({
+        operationId: context.operationId ?? randomUUID(),
+        path,
+        body,
+      })
+    )
+    .digest("hex");
   const result = await zernioRequest<{
     messageId?: string;
     data?: { messageId: string };
@@ -31,14 +50,17 @@ async function sendZernioMessage({
     apiKey: context.apiKey,
     path,
     method: "POST",
-    body: {
-      accountId: context.accountId,
-      message: buttons ? text.slice(0, 640) : text,
-      ...(buttons ? { buttons } : {}),
-    },
+    body,
+    ...(commentId ? {} : { idempotencyKey }),
+  }).catch((error: unknown) => {
+    // A send may have succeeded upstream before a network/5xx failure. The
+    // service releases idempotency claims on non-2xx, so do not auto-resend.
+    if (error instanceof ZernioApiError && error.code >= 500)
+      throw new ZernioDeliveryUnconfirmedError();
+    throw error;
   });
   const messageId = result?.messageId ?? result?.data?.messageId;
-  if (!messageId) throw new ZernioApiError(502);
+  if (!messageId) throw new ZernioDeliveryUnconfirmedError();
   return {
     message_id: messageId,
     ...(recipientId ? { recipient_id: recipientId } : {}),

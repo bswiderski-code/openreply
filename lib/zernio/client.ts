@@ -16,16 +16,27 @@ export class ZernioApiError extends MetaApiError {
   }
 }
 
+export class ZernioDeliveryUnconfirmedError extends ZernioApiError {
+  constructor() {
+    super(502);
+    this.name = "ZernioDeliveryUnconfirmedError";
+    this.message =
+      "Message delivery is unconfirmed. Inspect the Instagram inbox before retrying.";
+  }
+}
+
 export async function zernioRequest<T>({
   apiKey,
   path,
   method = "GET",
   body,
+  idempotencyKey,
 }: {
   apiKey: string;
   path: string;
   method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
+  idempotencyKey?: string;
 }): Promise<T> {
   if (!path.startsWith("/") || path.startsWith("//"))
     throw new Error("Invalid Zernio API path");
@@ -34,6 +45,7 @@ export async function zernioRequest<T>({
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
+      ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
     },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     cache: "no-store",
