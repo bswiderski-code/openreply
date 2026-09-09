@@ -15,7 +15,11 @@ export function requireEnv(name: string): string {
 }
 
 export function getBaseUrl(): string {
-  return process.env.NEXTAUTH_URL ?? "http://localhost:3000";
+  const url =
+    process.env.AUTH_URL ??
+    process.env.NEXTAUTH_URL ??
+    "http://localhost:3000";
+  return url.replace(/\/+$/, "");
 }
 
 export function getEncryptionKeyHex(): string {
