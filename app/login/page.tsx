@@ -1,4 +1,3 @@
-import { redirect } from "next/navigation";
 import { EMAIL_PROVIDER_ID, signIn } from "@/lib/auth";
 import { getCampaignTemplate } from "@/lib/templates/campaign-templates";
 import { DemoNotice } from "@/components/demo-notice";
@@ -30,24 +29,10 @@ export default async function LoginPage({
 
   async function sendMagicLink(formData: FormData) {
     "use server";
-    try {
-      await signIn(EMAIL_PROVIDER_ID, {
-        email: String(formData.get("email") ?? ""),
-        redirectTo: callbackUrl,
-      });
-    } catch (error) {
-      if (
-        error &&
-        typeof error === "object" &&
-        "digest" in error &&
-        typeof error.digest === "string" &&
-        error.digest.startsWith("NEXT_REDIRECT")
-      ) {
-        throw error;
-      }
-      console.error("[login] signIn failed:", error);
-      redirect("/login?error=Failed");
-    }
+    await signIn(EMAIL_PROVIDER_ID, {
+      email: String(formData.get("email") ?? ""),
+      redirectTo: callbackUrl,
+    });
   }
 
   return (
