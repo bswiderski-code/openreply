@@ -47,20 +47,12 @@ services:
       DATABASE_URL: postgresql://openreply:${POSTGRES_PASSWORD}@postgres:5432/openreply
       REDIS_URL: redis://redis:6379
 
-      # Email magic links (Resend)
-      RESEND_API_KEY: ${RESEND_API_KEY}
-      EMAIL_FROM: ${EMAIL_FROM}
+      # Email
+      EMAIL_FROM: "OpenReply <sm@sigma-inc.work>"
 
       # Optional
-      ALLOWED_EMAILS: ${ALLOWED_EMAILS}
+      ALLOWED_EMAILS: bartoszswiderski@icloud.com
       EMAIL_SERVER: ${EMAIL_SERVER}
-
-      # Meta / Instagram (leave unset in .env if using Zernio only)
-      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION}
-      INSTAGRAM_APP_ID: ${INSTAGRAM_APP_ID}
-      INSTAGRAM_APP_SECRET: ${INSTAGRAM_APP_SECRET}
-      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET}
-      WEBHOOK_VERIFY_TOKEN: ${WEBHOOK_VERIFY_TOKEN}
 
       # Optional polling reconciler tuning
       COMMENT_POLL_INTERVAL_MS: ${COMMENT_POLL_INTERVAL_MS:-300000}
@@ -82,12 +74,6 @@ services:
 
       DATABASE_URL: postgresql://openreply:${POSTGRES_PASSWORD}@postgres:5432/openreply
       REDIS_URL: redis://redis:6379
-
-      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION}
-      INSTAGRAM_APP_ID: ${INSTAGRAM_APP_ID}
-      INSTAGRAM_APP_SECRET: ${INSTAGRAM_APP_SECRET}
-      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET}
-      WEBHOOK_VERIFY_TOKEN: ${WEBHOOK_VERIFY_TOKEN}
 
       COMMENT_POLL_INTERVAL_MS: ${COMMENT_POLL_INTERVAL_MS:-300000}
       COMMENT_POLL_MAX_PER_SWEEP: ${COMMENT_POLL_MAX_PER_SWEEP:-30}
