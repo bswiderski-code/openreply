@@ -1,35 +1,98 @@
-# OpenReply — Local Development Services
-# Run: docker-compose up -d
-
 services:
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_DB: openreply
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
+      POSTGRES_USER: openreply
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U openreply -d openreply"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
 
   redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
+    image: redis:7
+    restart: unless-stopped
     volumes:
-      - redisdata:/data
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+
+  web:
+    build: .
+    restart: unless-stopped
+    command: sh -c "npm run db:generate && npm run db:migrate && npm run start"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "3000"
+    environment:
+      # App
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      CRON_SECRET: ${CRON_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+
+      # Database / queue
+      DATABASE_URL: postgresql://openreply:${POSTGRES_PASSWORD}@postgres:5432/openreply
+      REDIS_URL: redis://redis:6379
+
+      # Email magic links (Resend)
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      EMAIL_FROM: ${EMAIL_FROM}
+
+      # Optional
+      ALLOWED_EMAILS: ${ALLOWED_EMAILS}
+      EMAIL_SERVER: ${EMAIL_SERVER}
+
+      # Meta / Instagram (leave unset in .env if using Zernio only)
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION}
+      INSTAGRAM_APP_ID: ${INSTAGRAM_APP_ID}
+      INSTAGRAM_APP_SECRET: ${INSTAGRAM_APP_SECRET}
+      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET}
+      WEBHOOK_VERIFY_TOKEN: ${WEBHOOK_VERIFY_TOKEN}
+
+      # Optional polling reconciler tuning
+      COMMENT_POLL_INTERVAL_MS: ${COMMENT_POLL_INTERVAL_MS:-300000}
+      COMMENT_POLL_MAX_PER_SWEEP: ${COMMENT_POLL_MAX_PER_SWEEP:-30}
+      COMMENT_POLL_LOOKBACK_HOURS: ${COMMENT_POLL_LOOKBACK_HOURS:-72}
+
+  worker:
+    build: .
+    restart: unless-stopped
+    command: sh -c "npm run db:generate && npm run worker"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NEXTAUTH_URL: ${NEXTAUTH_URL}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+
+      DATABASE_URL: postgresql://openreply:${POSTGRES_PASSWORD}@postgres:5432/openreply
+      REDIS_URL: redis://redis:6379
+
+      META_GRAPH_API_VERSION: ${META_GRAPH_API_VERSION}
+      INSTAGRAM_APP_ID: ${INSTAGRAM_APP_ID}
+      INSTAGRAM_APP_SECRET: ${INSTAGRAM_APP_SECRET}
+      FACEBOOK_APP_SECRET: ${FACEBOOK_APP_SECRET}
+      WEBHOOK_VERIFY_TOKEN: ${WEBHOOK_VERIFY_TOKEN}
+
+      COMMENT_POLL_INTERVAL_MS: ${COMMENT_POLL_INTERVAL_MS:-300000}
+      COMMENT_POLL_MAX_PER_SWEEP: ${COMMENT_POLL_MAX_PER_SWEEP:-30}
+      COMMENT_POLL_LOOKBACK_HOURS: ${COMMENT_POLL_LOOKBACK_HOURS:-72}
 
 volumes:
-  pgdata:
-  redisdata:
+  postgres_data:
+  redis_data:
