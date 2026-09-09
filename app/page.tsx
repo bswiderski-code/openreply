@@ -15,6 +15,32 @@ const GITHUB_URL = "https://github.com/diwenne/openreply";
 const SETUP_DOCS_URL = `${GITHUB_URL}/blob/main/docs/setup.md`;
 const ZERNIO_DOCS_URL = `${GITHUB_URL}/blob/main/docs/zernio.md`;
 
+function formatStars(count: number): string {
+  if (count >= 1000) {
+    return `${(count / 1000).toFixed(1)}K`;
+  }
+  return count.toLocaleString();
+}
+
+const githubIconPath =
+  "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z";
+
+async function getGitHubStars(): Promise<number | null> {
+  try {
+    const res = await fetch("https://api.github.com/repos/diwenne/openreply", {
+      headers: { Accept: "application/vnd.github+json" },
+      next: { revalidate: 3600 },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { stargazers_count?: number };
+    return typeof data.stargazers_count === "number"
+      ? data.stargazers_count
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export const metadata: Metadata = {
   title: "OpenReply - Open source Instagram comment-to-DM automation",
   description:
@@ -147,28 +173,41 @@ const features = [
   ],
 ];
 
-export default function Home() {
+export default async function Home() {
+  const stars = await getGitHubStars();
   return (
-    <div className={`or-landing ${geist.className}`}>
+    <div id="top" className={`or-landing ${geist.className}`}>
       <a className="or-skip" href="#main">
         Skip to content
       </a>
       <DemoNotice variant="banner" />
       <header className="or-header">
         <div className="or-container or-nav">
-          <Link className="or-wordmark" href="/">
-            OpenReply<span aria-hidden="true">↗</span>
-          </Link>
+          <a className="or-wordmark" href="#top" aria-label="OpenReply home">
+            OpenReply
+          </a>
           <nav aria-label="Main navigation">
             <a href="#how">How it works</a>
             <a href="#setup">Self-host it</a>
             <a href={GITHUB_URL}>
               GitHub <span aria-hidden="true">↗</span>
             </a>
+            <a
+              className="or-stars"
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="View OpenReply on GitHub"
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <path d={githubIconPath} />
+              </svg>
+              {stars !== null && <span>{formatStars(stars)}</span>}
+            </a>
           </nav>
-          <Link className="or-button or-button-small" href="/login">
-            Open dashboard <span aria-hidden="true">↗</span>
-          </Link>
+          <a className="or-button or-button-small" href={GITHUB_URL}>
+            Get started <span aria-hidden="true">↗</span>
+          </a>
         </div>
       </header>
       <main id="main">

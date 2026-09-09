@@ -8,7 +8,7 @@ import { useSyncExternalStore } from "react";
  * a demo — naming this domain on their site would tell their visitors the
  * opposite of the truth.
  */
-const DEMO_HOST = "openreply.diwen.dev";
+const DEMO_HOST = "diwen.openreply.dev";
 
 const DISMISS_KEY = "openreply:demo-notice-dismissed";
 const SETUP_DOCS_URL =

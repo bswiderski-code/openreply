@@ -73,9 +73,22 @@
 }
 .or-nav nav {
   display: flex;
+  align-items: center;
   gap: 28px;
   font-size: 14px;
   color: var(--or-muted);
+}
+.or-stars {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  color: var(--or-ink);
+}
+.or-stars svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
 }
 .or-button {
   display: inline-flex;
@@ -657,7 +670,7 @@
     min-height: 72px;
     gap: 12px;
   }
-  .or-nav nav {
+  .or-nav nav a:not(.or-stars) {
     display: none;
   }
   .or-wordmark {
