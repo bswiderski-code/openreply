@@ -3,9 +3,35 @@ import { z } from 'zod';
 import { Prisma } from '@/app/generated/prisma/client';
 import { MetaApiError } from '@/lib/meta/client';
 import { canManageWorkspace, getCurrentWorkspaceContext, type WorkspaceContext } from '@/lib/workspace-access';
+import { getBaseUrl } from '@/lib/env';
 
 export class ConnectionError extends Error {
   constructor(message: string, public status = 400) { super(message); }
+}
+
+function isValidOrigin(origin: string | null, request: Request): boolean {
+  if (!origin) return true;
+
+  try {
+    const allowed = new Set<string>();
+
+    const base = getBaseUrl();
+    if (base) allowed.add(new URL(base).origin);
+
+    allowed.add(new URL(request.url).origin);
+
+    const proto = request.headers.get('x-forwarded-proto') || 'https';
+    const host = request.headers.get('x-forwarded-host') || request.headers.get('host');
+    if (host) {
+      allowed.add(`${proto}://${host}`);
+      allowed.add(`https://${host}`);
+      allowed.add(`http://${host}`);
+    }
+
+    return allowed.has(origin);
+  } catch {
+    return false;
+  }
 }
 
 export function withZernioManagement(handler: (context: WorkspaceContext, request: Request) => Promise<Response>) {
@@ -16,7 +42,9 @@ export function withZernioManagement(handler: (context: WorkspaceContext, reques
       if (!canManageWorkspace(context.role)) throw new ConnectionError('Only workspace owners and admins can manage the Zernio connection.', 403);
       if (request.method !== 'GET') {
         const origin = request.headers.get('origin');
-        if (origin && origin !== new URL(request.url).origin) throw new ConnectionError('Invalid request origin.', 403);
+        if (origin && !isValidOrigin(origin, request)) {
+          throw new ConnectionError('Invalid request origin.', 403);
+        }
       }
       return await handler(context, request);
     } catch (error) {
