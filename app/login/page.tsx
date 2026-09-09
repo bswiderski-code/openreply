@@ -1,6 +1,8 @@
+import { redirect } from "next/navigation";
 import { EMAIL_PROVIDER_ID, signIn } from "@/lib/auth";
 import { getCampaignTemplate } from "@/lib/templates/campaign-templates";
 import { DemoNotice } from "@/components/demo-notice";
+import { LoginSubmitButton } from "@/components/login-submit-button";
 
 export const metadata = {
   title: "Login - OpenReply",
@@ -14,10 +16,12 @@ export default async function LoginPage({
     checkEmail?: string;
     callbackUrl?: string;
     template?: string;
+    error?: string;
   }>;
 }) {
   const params = await searchParams;
   const checkEmail = params.checkEmail === "1";
+  const authError = params.error;
   const selectedTemplate = getCampaignTemplate(params.template);
   const templateCallbackUrl = selectedTemplate
     ? `/campaigns/new?template=${selectedTemplate.slug}`
@@ -26,10 +30,24 @@ export default async function LoginPage({
 
   async function sendMagicLink(formData: FormData) {
     "use server";
-    await signIn(EMAIL_PROVIDER_ID, {
-      email: String(formData.get("email") ?? ""),
-      redirectTo: callbackUrl,
-    });
+    try {
+      await signIn(EMAIL_PROVIDER_ID, {
+        email: String(formData.get("email") ?? ""),
+        redirectTo: callbackUrl,
+      });
+    } catch (error) {
+      if (
+        error &&
+        typeof error === "object" &&
+        "digest" in error &&
+        typeof error.digest === "string" &&
+        error.digest.startsWith("NEXT_REDIRECT")
+      ) {
+        throw error;
+      }
+      console.error("[login] signIn failed:", error);
+      redirect("/login?error=Failed");
+    }
   }
 
   return (
@@ -49,6 +67,18 @@ export default async function LoginPage({
         <DemoNotice variant="panel" />
 
         <div className="panel rounded p-8 shadow-black/40">
+          {authError && (
+            <div className="mb-5 rounded border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-400">
+              {authError === "Verification"
+                ? "The sign-in link has expired or has already been used."
+                : authError === "AccessDenied"
+                ? "Your email address is not authorized to sign in."
+                : authError === "Configuration"
+                ? "Email service is temporarily unavailable. Please verify SMTP settings."
+                : "Failed to send sign-in link. Please verify your email or try again."}
+            </div>
+          )}
+
           {selectedTemplate && !checkEmail && (
             <div className="mb-5 border border-accent/20 bg-accent/10 p-4">
               <p className="text-xs font-semibold uppercase tracking-wide text-accent">
@@ -88,12 +118,7 @@ export default async function LoginPage({
                 />
               </div>
 
-              <button
-                type="submit"
-                className="w-full inline-flex items-center justify-center gap-2 rounded bg-accent px-6 py-3.5 text-sm font-semibold text-white shadow-indigo-500/25 transition-all hover:shadow-indigo-500/30"
-              >
-                Email me a magic link
-              </button>
+              <LoginSubmitButton />
             </form>
           )}
         </div>

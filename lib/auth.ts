@@ -11,8 +11,26 @@ type AdapterPrismaClient = Parameters<typeof PrismaAdapter>[0];
 const emailFrom = process.env.EMAIL_FROM ?? "OpenReply <login@example.com>";
 // Setting EMAIL_SERVER switches magic links to your own SMTP server, for
 // self-hosters who do not want a third-party mail service. Resend stays the
-// default, so an existing deployment is unaffected.
 const smtpServer = process.env.EMAIL_SERVER;
+
+function getSmtpServer(smtpUrl?: string) {
+  if (!smtpUrl) return undefined;
+  try {
+    const url = new URL(smtpUrl);
+    const port = Number(url.port) || (url.protocol === "smtps:" ? 465 : 587);
+    return {
+      host: url.hostname,
+      port,
+      secure: port === 465,
+      auth: {
+        user: decodeURIComponent(url.username),
+        pass: decodeURIComponent(url.password),
+      },
+    };
+  } catch {
+    return smtpUrl;
+  }
+}
 
 /**
  * Provider id the login form has to sign in with. It differs per transport,
@@ -24,7 +42,7 @@ export const authConfig = {
   adapter: PrismaAdapter(prisma as unknown as AdapterPrismaClient),
   providers: [
     smtpServer
-      ? Nodemailer({ server: smtpServer, from: emailFrom })
+      ? Nodemailer({ server: getSmtpServer(smtpServer), from: emailFrom })
       : Resend({
           apiKey: process.env.RESEND_API_KEY ?? "missing-resend-api-key",
           from: emailFrom,

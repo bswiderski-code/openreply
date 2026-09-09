@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
 import "./landing.css";
 import Link from "next/link";
 import Image from "next/image";
@@ -174,6 +176,12 @@ const features = [
 ];
 
 export default async function Home() {
+  const session = await auth();
+  if (session?.user?.id) {
+    redirect("/dashboard");
+  }
+  redirect("/login");
+
   const stars = await getGitHubStars();
   return (
     <div id="top" className={`or-landing ${geist.className}`}>
